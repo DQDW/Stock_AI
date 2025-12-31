@@ -7,23 +7,28 @@ from tensorflow.keras.layers import LSTM, Dense
 import tensorflow as tf
 import os
 import time
-import datetime  # <--- 날짜를 찍기 위해 추가
+import datetime
 
 # 불필요한 로그 제거
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # ==========================================
-# 1. 설정
+# 1. 설정 (종목 추가 완료!)
 # ==========================================
 targets = {
+    # 🇰🇷 한국 주식
     "삼성전자": "005930.KS",
     "SK하이닉스": "000660.KS",
     "LG에너지솔루션": "373220.KS",
-    "현대차": "005380.KS",
-    "NAVER": "035420.KS"
+    "방림": "003610.KS",          # (추가됨)
+    "강원에너지": "114190.KQ",      # (추가됨 - 코스닥)
+    
+    # 🇺🇸 미국 주식
+    "록히드마틴": "LMT",           # (추가됨)
+    "보잉": "BA"                  # (추가됨)
 }
 
-ENSEMBLE_COUNT = 5     # 5번 반복 학습 (앙상블)
+ENSEMBLE_COUNT = 5     # 5번 반복 학습
 EPOCHS = 100           # 100번 학습
 BATCH_SIZE = 64        # 3060 성능 활용
 DATA_PERIOD = "20y"    # 20년치 데이터
@@ -33,6 +38,14 @@ results = []
 def predict_stock_ensemble(name, ticker):
     print(f"\n🔄 [{name}] 20년치 데이터 로딩 중... AI 학습 시작!")
     
+    # 화폐 단위 결정 (티커에 .KS나 .KQ가 없으면 미국 주식으로 간주)
+    if ".KS" in ticker or ".KQ" in ticker:
+        currency = "원"
+        is_korea = True
+    else:
+        currency = "달러"
+        is_korea = False
+
     try:
         df = yf.Ticker(ticker).history(period=DATA_PERIOD)
         if len(df) < 100: 
@@ -70,7 +83,12 @@ def predict_stock_ensemble(name, ticker):
             pred_price = scaler.inverse_transform(pred_scaled)[0][0]
             
             predictions.append(pred_price)
-            print(f"   👉 [{i+1}/{ENSEMBLE_COUNT}] 예측: {pred_price:,.0f}원", end="\r")
+            
+            # 출력할 때 한국은 소수점 없이, 미국은 소수점 2자리까지
+            if is_korea:
+                print(f"   👉 [{i+1}/{ENSEMBLE_COUNT}] 예측: {pred_price:,.0f}{currency}", end="\r")
+            else:
+                print(f"   👉 [{i+1}/{ENSEMBLE_COUNT}] 예측: {pred_price:,.2f}{currency}", end="\r")
 
         print(f"\n   ✅ 평균 예측 완료!")
 
@@ -79,11 +97,21 @@ def predict_stock_ensemble(name, ticker):
         rate = (gap / current_price) * 100
         direction = "🔺상승" if gap > 0 else "🔽하락"
 
+        # 결과 포맷팅 (한국: 정수 / 미국: 소수점)
+        if is_korea:
+            price_str = f"{current_price:,.0f}{currency}"
+            pred_str = f"{avg_price:,.0f}{currency}"
+            gap_str = f"{gap:+,.0f}{currency}"
+        else:
+            price_str = f"{current_price:,.2f}{currency}"
+            pred_str = f"{avg_price:,.2f}{currency}"
+            gap_str = f"{gap:+,.2f}{currency}"
+
         return {
             "종목명": name,
-            "현재가": f"{current_price:,.0f}원",
-            "내일예측(평균)": f"{avg_price:,.0f}원",
-            "예상등락": f"{gap:+,.0f}원 ({rate:+.2f}%)",
+            "현재가": price_str,
+            "내일예측(평균)": pred_str,
+            "예상등락": f"{gap_str} ({rate:+.2f}%)",
             "방향": direction
         }
 
@@ -97,7 +125,7 @@ def predict_stock_ensemble(name, ticker):
 start_time = time.time()
 
 print("=" * 60)
-print(f"🚀 [ULTIMATE 모드] 20년 데이터 x 100회 학습 (RTX 3060)")
+print(f"🚀 [글로벌 모드] 한국/미국 주식 통합 분석 (RTX 3060)")
 print("=" * 60)
 
 for name, ticker in targets.items():
@@ -114,18 +142,15 @@ print("\n" + "=" * 65)
 print("📊 [AI 주가 예측 최종 리포트]")
 print("=" * 65)
 
-# 결과 데이터프레임 생성
 df_result = pd.DataFrame(results)
 df_result = df_result[['종목명', '현재가', '내일예측(평균)', '예상등락', '방향']]
 print(df_result.to_string(index=False))
 print("=" * 65)
 print(f"⏱️ 총 소요 시간: {minutes}분 {seconds}초")
 
-# ▼▼▼ CSV 파일 저장 (여기가 추가됨) ▼▼▼
+# CSV 파일 저장
 today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 filename = f"stock_prediction_{today_str}.csv"
-
-# encoding='utf-8-sig'는 엑셀에서 한글 안 깨지게 하는 옵션
 df_result.to_csv(filename, index=False, encoding='utf-8-sig')
 
 print(f"💾 결과 저장 완료: {filename}")
